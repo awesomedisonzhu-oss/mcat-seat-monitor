@@ -45,8 +45,10 @@ START_URL = "https://auth.aamc.org/account/#/login?goto=https:%2F%2Fmcat.aamc.or
 SCHEDULER_HOME = "https://mcat.aamc.org/mrs"
 TARGET_DATES = [d.strip() for d in (os.environ.get("TARGET_DATES") or
                 "02/12/2027,03/06/2027,03/19/2027").split(",") if d.strip()]
-INCLUDE = [c.strip().lower() for c in (os.environ.get("INCLUDE_CENTERS") or
-           "255 Greenwich,Herald Square,W 44th,Brooklyn NY,New York City NY TBD").split(",") if c.strip()]
+# By default alert on any center within MAX_MILES of the search point (lower Manhattan).
+# Set INCLUDE_CENTERS to a comma-separated list of name fragments to use a fixed list instead.
+INCLUDE = [c.strip().lower() for c in (os.environ.get("INCLUDE_CENTERS") or "").split(",") if c.strip()]
+MAX_MILES = float(os.environ.get("MAX_MILES") or 10)
 # Clicks from the AAMC dashboard to the "Find a new appointment" search (mapped from the live site)
 NAV_STEPS = ["Reschedule or Cancel Appointment", "MCAT: Medical College Admission Test", "Reschedule"]
 
@@ -278,11 +280,17 @@ def search_date(page, date):
         if not m:
             continue
         name = m.group(1).strip()
-        if not any(x in name.lower() for x in INCLUDE):
+        mi = re.search(r"([\d.]+)\s*mi\b", text)
+        dist = float(mi.group(1)) if mi else None
+        if INCLUDE:
+            if not any(x in name.lower() for x in INCLUDE):
+                continue
+        elif dist is None or dist > MAX_MILES:
             continue
         times = TIME_RE.findall(text)
         if times:
-            found.append(f"{date} – {name}: {', '.join(sorted(set(t.strip() for t in times))[:6])}")
+            where = f"{name} ({dist:g} mi)" if dist is not None else name
+            found.append(f"{date} – {where}: {', '.join(sorted(set(t.strip() for t in times))[:6])}")
     log(f"{date}: {len(found)} matching center(s) with times")
     return found
 
