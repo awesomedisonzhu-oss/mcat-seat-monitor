@@ -2,8 +2,13 @@ name: Check MCAT seats
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every ~15 minutes (GitHub may delay runs a bit)
+    - cron: "*/5 * * * *"   # wakes every ~5 min; gate.py runs a real check at random 15-25 min gaps
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Just send a test alert (no real check)"
+        type: boolean
+        default: false
 
 concurrency:
   group: mcat-check
@@ -16,16 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install
-        run: |
-          pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
-
       - name: Restore monitor state
         uses: actions/cache/restore@v4
         with:
@@ -33,19 +28,38 @@ jobs:
           key: state-${{ github.run_id }}
           restore-keys: state-
 
+      - name: Decide whether to check now
+        id: gate
+        run: python3 gate.py
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
       - name: Check for seats
+        if: steps.gate.outputs.run == 'true'
         env:
           AAMC_USERNAME: ${{ secrets.AAMC_USERNAME }}
           AAMC_PASSWORD: ${{ secrets.AAMC_PASSWORD }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TARGET_DATES: ${{ vars.TARGET_DATES }}
           INCLUDE_CENTERS: ${{ vars.INCLUDE_CENTERS }}
+          TEST_ALERT: ${{ inputs.test_alert && '1' || '0' }}
         run: python monitor.py
 
       - name: Save monitor state
-        if: always()
+        if: always() && steps.gate.outputs.run == 'true' && !inputs.test_alert
         uses: actions/cache/save@v4
         with:
           path: state
