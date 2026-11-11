@@ -293,6 +293,13 @@ def main():
     if missing:
         log("Missing secrets: " + ", ".join(missing))
         sys.exit(1)
+    if os.environ.get("TEST_ALERT") == "1":  # manual "send test alert" run
+        notify("MCAT seat open! (TEST)",
+               "This is a test of your MCAT seat alert. Nothing is actually open.\n\n"
+               "A real alert looks like this:\n"
+               "03/06/2027 – NY (Herald Square): 8:00 AM, 1:30 PM\n"
+               "Open the scheduler and book it now.")
+        return
     try:
         state = json.loads(STATE_FILE.read_text())
     except Exception:
