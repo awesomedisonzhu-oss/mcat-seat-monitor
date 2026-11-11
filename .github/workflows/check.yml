@@ -1,0 +1,52 @@
+name: Check MCAT seats
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every ~15 minutes (GitHub may delay runs a bit)
+  workflow_dispatch:
+
+concurrency:
+  group: mcat-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - name: Check for seats
+        env:
+          AAMC_USERNAME: ${{ secrets.AAMC_USERNAME }}
+          AAMC_PASSWORD: ${{ secrets.AAMC_PASSWORD }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TARGET_DATES: ${{ vars.TARGET_DATES }}
+          INCLUDE_CENTERS: ${{ vars.INCLUDE_CENTERS }}
+        run: python monitor.py
+
+      - name: Save monitor state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: state-${{ github.run_id }}
