@@ -59,6 +59,14 @@ TIME_RE = re.compile(r"\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b", re.I)
 STATE_FILE = Path("state/state.json")
 
 
+def next_gap():
+    """Seconds until the next real check: 45-60 min overnight (1-6 AM New York time), else 15-25 min."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    hour = datetime.now(ZoneInfo("America/New_York")).hour
+    return random.uniform(45, 60) * 60 if 1 <= hour < 6 else random.uniform(15, 25) * 60
+
+
 def log(msg):
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
@@ -335,14 +343,14 @@ def main():
         if state.get("error"):
             notify("MCAT monitor working again", "Checks are running normally.", priority="low", tags="white_check_mark")
         state.update(error="", last_alert=msg)
-        state["next_run"] = time.time() + random.uniform(15, 25) * 60  # random 15-25 min gap
+        state["next_run"] = time.time() + next_gap()  # random gap, slower overnight
     except Exception as e:
         err = str(e).splitlines()[0][:300]
         log(f"ERROR: {err}")
         if state.get("error") != err:
             notify("MCAT monitor needs attention", err, priority="default", tags="warning")
         state["error"] = err
-        state["next_run"] = time.time() + random.uniform(15, 25) * 60
+        state["next_run"] = time.time() + next_gap()
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(state))
         sys.exit(1)
