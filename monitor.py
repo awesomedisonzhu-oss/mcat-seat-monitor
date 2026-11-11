@@ -114,7 +114,8 @@ def fetch_code(since_ts, wait_s=180):
                     if part.get_content_type() in ("text/plain", "text/html"):
                         text += part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", "ignore")
                 text = re.sub(r"<[^>]+>", " ", text)
-                m = re.search(r"\b(\d{6,8})\b", subj + " " + text)
+                m = (re.search(r"code is\s*(\d{4,8})", text, re.I)
+                     or re.search(r"\b(\d{6})\b", subj + " " + text))
                 if m:
                     M.store(mid, "+X-GM-LABELS", "\\Trash")  # tidy up the code email
                     M.logout()
@@ -147,19 +148,28 @@ def sign_in(page):
         settle(page)
         code = fetch_code(requested)
         log("Got the code from Gmail")
-        box = page.locator("input[type=text]:visible, input[type=tel]:visible, input[type=number]:visible, "
-                           "input[autocomplete=one-time-code]").first
+        box = page.locator("input:visible:not([type=hidden]):not([type=checkbox]):not([type=radio])").first
         box.wait_for(state="visible", timeout=20000)
-        box.fill(code)
-        page.wait_for_timeout(500)
-        btn = page.get_by_role("button", name=re.compile(r"verify|submit|continue|sign\s*in", re.I))
-        if btn.count():
+        box.click()
+        page.keyboard.type(code, delay=120)  # works for one box or six one-digit boxes
+        page.wait_for_timeout(800)
+        btn = page.get_by_role("button", name=re.compile(r"verify|submit|continue|sign\s*in|confirm", re.I))
+        if btn.count() and btn.first.is_enabled():
             btn.first.click()
         else:
-            box.press("Enter")
+            page.keyboard.press("Enter")
+        for _ in range(10):  # wait up to ~20s to leave the sign-in site
+            page.wait_for_timeout(2000)
+            if "auth.aamc.org" not in page.url:
+                break
         settle(page)
-        page.wait_for_timeout(3000)
-        if re.search(r"two-factor|one-time code|invalid|incorrect", body_text(page), re.I) and "auth.aamc.org" in page.url:
+        if "auth.aamc.org" in page.url:
+            inputs = page.locator("input:visible").evaluate_all(
+                "els => els.map(e => `${e.type}/${e.maxLength}/${e.placeholder||''}`)")
+            buttons = page.locator("button:visible").all_inner_texts()
+            snippet = re.sub(r"\S+@\S+|\d{3,}", "[hidden]", " ".join(body_text(page).split()))[:400]
+            log(f"Code page inputs: {inputs} | buttons: {buttons}")
+            log(f"Page says: {snippet}")
             raise RuntimeError("AAMC didn't accept the emailed code.")
     log("Signed in")
 
