@@ -242,7 +242,15 @@ def search_date(page, date):
     vals = page.evaluate(SET_DATE_JS, date)  # the date box is calendar-only, so set it directly
     log(f"Date set to {vals[0]} (hidden: {vals[1]})")
     page.keyboard.press("Escape")
-    page.click(SEL_SEARCH)
+    try:
+        page.click(SEL_SEARCH, timeout=5000)
+    except PWTimeout:
+        blocker = page.evaluate("""() => { const b = document.querySelector('#testCenterSearch');
+            if (!b) return 'no search button'; const r = b.getBoundingClientRect();
+            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return top ? (top.tagName + '#' + top.id + '.' + String(top.className).slice(0, 60)) : 'offscreen'; }""")
+        log(f"Search button covered by: {blocker}; pressing it directly")
+        page.evaluate("document.querySelector('#testCenterSearch').click()")
     settle(page)
     page.wait_for_timeout(2000)
     if page.get_by_text(re.compile(r"Available Appointments\s*-\s*" + re.escape(date))).count() == 0:
