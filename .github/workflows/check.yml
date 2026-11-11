@@ -17,6 +17,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # only used by the keep-alive step below
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -64,3 +66,16 @@ jobs:
         with:
           path: state
           key: state-${{ github.run_id }}
+
+      # GitHub pauses schedules in public repos after 60 days with no changes.
+      # Every ~3 weeks this saves a tiny file so the schedule keeps running.
+      - name: Keep the schedule alive
+        if: steps.gate.outputs.run == 'true' && !inputs.test_alert
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt 1814400 ]; then
+            date -u > .keepalive
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .keepalive && git commit -m "keep schedule alive" && git push
+          fi
