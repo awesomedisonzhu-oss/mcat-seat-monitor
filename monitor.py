@@ -21,11 +21,14 @@ import email
 import imaplib
 import json
 import os
+import random
 import re
+import smtplib
 import sys
 import time
 import urllib.request
 from email.header import decode_header
+from email.mime.text import MIMEText
 from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PWTimeout
@@ -35,7 +38,8 @@ USERNAME = os.environ.get("AAMC_USERNAME", "")
 PASSWORD = os.environ.get("AAMC_PASSWORD", "")
 GMAIL = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_PW = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # optional phone push
+ALERT_TO = [a.strip() for a in (os.environ.get("ALERT_TO") or GMAIL).split(",") if a.strip()]
 
 START_URL = "https://auth.aamc.org/account/#/login?goto=https:%2F%2Fmcat.aamc.org%2Fmrs"
 SCHEDULER_HOME = "https://mcat.aamc.org/mrs"
@@ -58,14 +62,25 @@ def log(msg):
 
 
 def notify(title, message, priority="high", tags="rotating_light"):
-    req = urllib.request.Request(
-        f"https://ntfy.sh/{NTFY_TOPIC}", data=message.encode("utf-8"), method="POST",
-        headers={"Title": title, "Priority": priority, "Tags": tags, "Click": SCHEDULER_HOME})
+    # Email (from your own Gmail) to ALERT_TO: your inbox and/or a carrier text-message address
     try:
-        urllib.request.urlopen(req, timeout=20).read()
-        log(f"Notified: {title}")
+        mail = MIMEText(f"{message}\n\nScheduler: {SCHEDULER_HOME}")
+        mail["Subject"], mail["From"], mail["To"] = title, GMAIL, ", ".join(ALERT_TO)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
+            smtp.login(GMAIL, GMAIL_PW)
+            smtp.sendmail(GMAIL, ALERT_TO, mail.as_string())
+        log(f"Emailed alert: {title}")
     except Exception as e:
-        log(f"Notification failed: {e}")
+        log(f"Email alert failed: {type(e).__name__}")
+    if NTFY_TOPIC:
+        req = urllib.request.Request(
+            f"https://ntfy.sh/{NTFY_TOPIC}", data=message.encode("utf-8"), method="POST",
+            headers={"Title": title, "Priority": priority, "Tags": tags, "Click": SCHEDULER_HOME})
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+            log(f"Pushed alert: {title}")
+        except Exception as e:
+            log(f"Push alert failed: {type(e).__name__}")
 
 
 def settle(page):
@@ -273,7 +288,7 @@ def search_date(page, date):
 
 
 def main():
-    missing = [k for k in ("AAMC_USERNAME", "AAMC_PASSWORD", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "NTFY_TOPIC")
+    missing = [k for k in ("AAMC_USERNAME", "AAMC_PASSWORD", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")
                if not os.environ.get(k)]
     if missing:
         log("Missing secrets: " + ", ".join(missing))
@@ -305,12 +320,14 @@ def main():
         if state.get("error"):
             notify("MCAT monitor working again", "Checks are running normally.", priority="low", tags="white_check_mark")
         state.update(error="", last_alert=msg)
+        state["next_run"] = time.time() + random.uniform(15, 25) * 60  # random 15-25 min gap
     except Exception as e:
         err = str(e).splitlines()[0][:300]
         log(f"ERROR: {err}")
         if state.get("error") != err:
             notify("MCAT monitor needs attention", err, priority="default", tags="warning")
         state["error"] = err
+        state["next_run"] = time.time() + random.uniform(15, 25) * 60
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(state))
         sys.exit(1)
