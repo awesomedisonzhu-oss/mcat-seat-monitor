@@ -224,8 +224,23 @@ def get_to_search(page):
 
 
 # ---------- search ----------
+SET_DATE_JS = """(d) => {
+  const s = document.querySelector('#preferredDateShown');
+  const h = document.querySelector('#preferredDateHidden');
+  const before = h ? h.value : '';
+  try { if (window.jQuery && jQuery(s).datepicker) jQuery(s).datepicker('setDate', d); } catch (e) {}
+  s.removeAttribute('readonly');
+  s.value = d;
+  ['input', 'change', 'blur'].forEach(t => s.dispatchEvent(new Event(t, {bubbles: true})));
+  if (h && (!h.value || h.value === before)) h.value = d;
+  return [s.value, h ? h.value : null];
+}"""
+
+
 def search_date(page, date):
-    page.fill(SEL_DATE, date)
+    dismiss_cookies(page)
+    vals = page.evaluate(SET_DATE_JS, date)  # the date box is calendar-only, so set it directly
+    log(f"Date set to {vals[0]} (hidden: {vals[1]})")
     page.keyboard.press("Escape")
     page.click(SEL_SEARCH)
     settle(page)
