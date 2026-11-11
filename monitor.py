@@ -179,7 +179,20 @@ def sign_in(page):
     log("Signed in")
 
 
+def dismiss_cookies(page):
+    for pattern in (r"reject|decline|necessary only", r"allow and continue|accept all|^\s*accept\s*$"):
+        btn = page.get_by_role("button", name=re.compile(pattern, re.I))
+        try:
+            if btn.count() and btn.first.is_visible():
+                btn.first.click()
+                page.wait_for_timeout(1000)
+                return
+        except Exception:
+            pass
+
+
 def click_step(page, text):
+    dismiss_cookies(page)
     exact = page.get_by_role("link", name=text, exact=True).or_(page.get_by_role("button", name=text, exact=True))
     loose = page.get_by_role("link", name=re.compile(re.escape(text), re.I)).or_(
         page.get_by_role("button", name=re.compile(re.escape(text), re.I)))
@@ -202,7 +215,9 @@ def get_to_search(page):
             click_step(page, step)
         except PWTimeout:
             labels = page.locator("a:visible, button:visible").all_inner_texts()
-            log("Clickable here: " + " | ".join(sorted({l.strip()[:40] for l in labels if l.strip()}))[:1200])
+            # logs are public: skip anything multi-line (profile name) and hide numbers
+            safe = {re.sub(r"\d+", "#", l.strip()[:40]) for l in labels if l.strip() and "\n" not in l.strip()}
+            log("Clickable here: " + " | ".join(sorted(x for x in safe if "ID" not in x))[:1200])
             raise RuntimeError(f"Couldn't find '{step}' (on {page.url.split('?')[0]}).")
     if not visible(page, SEL_ADDRESS, timeout=15000):
         raise RuntimeError(f"Didn't reach the appointment search (on {page.url.split('?')[0]}).")
