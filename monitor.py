@@ -150,10 +150,15 @@ def sign_in(page):
         log("Got the code from Gmail")
         box = page.locator("input:visible:not([type=hidden]):not([type=checkbox]):not([type=radio])").first
         box.wait_for(state="visible", timeout=20000)
-        box.click()
-        page.keyboard.type(code, delay=120)  # works for one box or six one-digit boxes
+        digits = page.locator("input[maxlength='1']:visible")
+        if digits.count() >= len(code):  # AAMC uses six one-digit boxes
+            for i, d in enumerate(code):
+                digits.nth(i).fill(d)
+        else:
+            box.click()
+            page.keyboard.type(code, delay=120)
         page.wait_for_timeout(800)
-        btn = page.get_by_role("button", name=re.compile(r"verify|submit|continue|sign\s*in|confirm", re.I))
+        btn = page.get_by_role("button", name=re.compile(r"authenticate|verify|submit|continue|sign\s*in|confirm", re.I))
         if btn.count() and btn.first.is_enabled():
             btn.first.click()
         else:
