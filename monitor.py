@@ -49,6 +49,10 @@ TARGET_DATES = [d.strip() for d in (os.environ.get("TARGET_DATES") or
 # Set INCLUDE_CENTERS to a comma-separated list of name fragments to use a fixed list instead.
 INCLUDE = [c.strip().lower() for c in (os.environ.get("INCLUDE_CENTERS") or "").split(",") if c.strip()]
 MAX_MILES = float(os.environ.get("MAX_MILES") or 100)
+# Areas to search each check: "place:radius-in-miles;..." (first entry uses MAX_MILES if no radius given)
+SEARCHES = [(p.split(":")[0].strip(), float(p.split(":")[1]) if ":" in p else MAX_MILES)
+            for p in (os.environ.get("SEARCHES") or
+                      "New York, NY:100;Washington, DC:25;Chicago, IL:25").split(";") if p.strip()]
 # Clicks from the AAMC dashboard to the "Find a new appointment" search (mapped from the live site)
 NAV_STEPS = ["Reschedule or Cancel Appointment", "MCAT: Medical College Admission Test", "Reschedule"]
 
@@ -262,24 +266,32 @@ SET_DATE_JS = """(d) => {
 }"""
 
 
-def search_date(page, date):
+def search_date(page, date, address=None, radius=None):
+    """Search one date. If address is given, search around that place (typed + real click so the site looks it up)."""
+    radius = MAX_MILES if radius is None else radius
     dismiss_cookies(page)
+    if address:
+        page.locator(SEL_ADDRESS).first.fill(address)
     vals = page.evaluate(SET_DATE_JS, date)  # the date box is calendar-only, so set it directly
-    log(f"Date set to {vals[0]} (hidden: {vals[1]})")
+    log(f"{address or 'Search'}: date set to {vals[0]}")
     page.keyboard.press("Escape")
-    try:
-        page.click(SEL_SEARCH, timeout=5000)
-    except PWTimeout:
-        blocker = page.evaluate("""() => { const b = document.querySelector('#testCenterSearch');
-            if (!b) return 'no search button'; const r = b.getBoundingClientRect();
-            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-            return top ? (top.tagName + '#' + top.id + '.' + String(top.className).slice(0, 60)) : 'offscreen'; }""")
-        log(f"Search button covered by: {blocker}; pressing it directly")
+    btn = page.locator("button:visible, input[type=submit]:visible").filter(has_text=re.compile(r"^\s*search\s*$", re.I))
+    if not btn.count():
+        btn = page.locator("input[type=submit][value='Search' i]:visible")
+    if btn.count():
+        btn.first.click()
+    elif address:
+        raise RuntimeError("Couldn't find the visible Search button to look up a new place.")
+    else:
         page.evaluate("document.querySelector('#testCenterSearch').click()")
     settle(page)
     page.wait_for_timeout(2000)
     if page.get_by_text(re.compile(r"Available Appointments\s*-\s*" + re.escape(date))).count() == 0:
         raise RuntimeError(f"Search for {date} didn't load results for that date.")
+    if address:  # make sure the site actually searched around the new place
+        dists = [float(x) for x in re.findall(r"([\d.]+)\s*mi\b", page.locator("table").first.inner_text())]
+        if not dists or min(dists) > 25:
+            raise RuntimeError(f"Search around {address} didn't take (nearest center {min(dists) if dists else '?'} mi).")
     found = []
     rows = page.locator("table tbody tr")
     for i in range(rows.count()):
@@ -296,13 +308,13 @@ def search_date(page, date):
         if INCLUDE:
             if not any(x in name.lower() for x in INCLUDE):
                 continue
-        elif dist is None or dist > MAX_MILES:
+        elif dist is None or dist > radius:
             continue
         times = TIME_RE.findall(text)
         if times:
             where = f"{name} ({dist:g} mi)" if dist is not None else name
             found.append(f"{date} – {where}: {', '.join(sorted(set(t.strip() for t in times))[:6])}")
-    log(f"{date}: {len(found)} matching center(s) with times")
+    log(f"{address or 'Search'} {date}: {len(found)} matching center(s) with times")
     return found
 
 
@@ -334,8 +346,11 @@ def main():
             sign_in(page)
             get_to_search(page)
             openings = []
-            for date in TARGET_DATES:
-                openings += search_date(page, date)
+            for place, radius in SEARCHES:
+                for n, date in enumerate(TARGET_DATES):
+                    for hit in search_date(page, date, address=place if n == 0 else None, radius=radius):
+                        if hit not in openings:  # areas can overlap
+                            openings.append(hit)
             browser.close()
 
         msg = "\n".join(openings)
