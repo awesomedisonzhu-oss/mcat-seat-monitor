@@ -285,10 +285,19 @@ def search_date(page, date, address=None, radius=None):
         raise RuntimeError("Couldn't find the visible Search button to look up a new place.")
     else:
         page.evaluate("document.querySelector('#testCenterSearch').click()")
-    settle(page)
-    page.wait_for_timeout(2000)
-    if page.get_by_text(re.compile(r"Available Appointments\s*-\s*" + re.escape(date))).count() == 0:
+    # The site looks up the place first and then loads results, so wait until they're really there
+    header = re.compile(r"Available Appointments\s*-\s*" + re.escape(date))
+    for _ in range(30):
+        page.wait_for_timeout(1000)
+        try:
+            settle(page)
+            if page.get_by_text(header).count() and page.locator("table tbody tr").count():
+                break
+        except Exception:  # page was mid-navigation; try again
+            pass
+    else:
         raise RuntimeError(f"Search for {date} didn't load results for that date.")
+    page.wait_for_timeout(1000)
     if address:  # make sure the site actually searched around the new place
         dists = [float(x) for x in re.findall(r"([\d.]+)\s*mi\b", page.locator("table").first.inner_text())]
         if not dists or min(dists) > 25:
