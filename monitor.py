@@ -283,7 +283,10 @@ def search_date(page, date):
     found = []
     rows = page.locator("table tbody tr")
     for i in range(rows.count()):
-        text = rows.nth(i).inner_text()
+        # Open times are buttons/inputs whose labels aren't in inner_text, so include their values too
+        text = rows.nth(i).evaluate(
+            "r => r.innerText + ' ' + [...r.querySelectorAll('input, button, a')]"
+            ".map(e => (e.value || '') + ' ' + (e.textContent || '') + ' ' + (e.getAttribute('aria-label') || '')).join(' ')")
         m = re.search(r"Pearson Professional Centers-([^\n]+)", text)
         if not m:
             continue
