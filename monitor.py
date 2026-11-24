@@ -275,9 +275,10 @@ def search_date(page, date, address=None, radius=None):
     vals = page.evaluate(SET_DATE_JS, date)  # the date box is calendar-only, so set it directly
     log(f"{address or 'Search'}: date set to {vals[0]}")
     page.keyboard.press("Escape")
-    btn = page.locator("button:visible, input[type=submit]:visible").filter(has_text=re.compile(r"^\s*search\s*$", re.I))
+    # The visible SEARCH is <input type=button id=addressSearch>; it looks up the place, then searches
+    btn = page.locator("#addressSearch:visible")
     if not btn.count():
-        btn = page.locator("input[type=submit][value='Search' i]:visible")
+        btn = page.get_by_role("button", name=re.compile(r"^\s*search\s*$", re.I)).locator("visible=true")
     if btn.count():
         btn.first.click()
     elif address:
